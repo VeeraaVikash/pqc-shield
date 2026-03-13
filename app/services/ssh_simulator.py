@@ -1,16 +1,16 @@
 """
-SSH Bastion Simulator — generates realistic SSH session data.
-Replaces all frontend mock SSH_BASTIONS and SSH_SESSIONS constants.
-Runs in-memory, refreshes each API call with slight variations.
+SSH Bastion Simulator — generates STABLE SSH session data.
+Uses persistent state so numbers don't jump randomly between API calls.
 """
 import random
+import math
 import uuid
 import time
 from datetime import datetime, timedelta
 
 _start_time = time.time()
 
-# Fixed bastion hosts (these represent real infrastructure)
+# Fixed bastion hosts (represent real infrastructure)
 _BASTIONS = [
     {"id": "BASTION-01", "host": "ssh-gw-east.pqc-vault.io", "region": "us-east-1", "ip": "10.0.1.50"},
     {"id": "BASTION-02", "host": "ssh-gw-west.pqc-vault.io", "region": "us-west-2", "ip": "10.0.2.50"},
@@ -27,35 +27,64 @@ _TARGETS = [
 _ALGOS = ["Dilithium3", "Dilithium5", "SPHINCS+-SHA256", "Falcon-512"]
 _KEM_ALGOS = ["Kyber768", "Kyber1024"]
 
+# ── Persistent bastion state ──
+_bastion_state = None
+_session_state = None
+_session_last_refresh = 0
+
+
+def _init_bastion_state():
+    global _bastion_state
+    _bastion_state = []
+    for b in _BASTIONS:
+        _bastion_state.append({
+            **b,
+            "sessions": random.randint(15, 35),
+            "auth_algo": random.choice(["Dilithium3", "Dilithium5"]),
+            "kex_algo": random.choice(["Kyber768", "Kyber1024"]),
+            "mode": random.choices(["PQC-Only", "Hybrid"], weights=[70, 30])[0],
+            "cpu": random.uniform(20, 50),
+            "memory": random.uniform(40, 65),
+            "failed_24h": random.randint(1, 8),
+            "kex_today": random.randint(400, 600),
+        })
+
 
 def get_ssh_bastions():
-    """Returns list of SSH bastion hosts with real-time metrics."""
-    elapsed = time.time() - _start_time
-    bastions = []
+    """Returns list of SSH bastion hosts with slowly drifting metrics."""
+    global _bastion_state
+    if _bastion_state is None:
+        _init_bastion_state()
 
-    for b in _BASTIONS:
-        sessions = random.randint(8, 45)
-        algo = random.choice(_ALGOS)
-        kem = random.choice(_KEM_ALGOS)
-        uptime_hours = int(elapsed / 3600) + random.randint(100, 500)
+    elapsed = time.time() - _start_time
+
+    bastions = []
+    for bs in _bastion_state:
+        # Slow drift
+        bs["sessions"] = max(8, min(50, bs["sessions"] + random.uniform(-0.5, 0.7)))
+        bs["cpu"] = max(10, min(80, bs["cpu"] + random.uniform(-0.3, 0.3)))
+        bs["memory"] = max(25, min(85, bs["memory"] + random.uniform(-0.2, 0.2)))
+        bs["kex_today"] += random.randint(0, 2)
+
+        uptime_hours = int(elapsed / 3600) + 240
 
         bastions.append({
-            "id": b["id"],
-            "host": b["host"],
-            "ip": b["ip"],
-            "region": b["region"],
-            "status": random.choices(["active", "maintenance"], weights=[95, 5])[0],
-            "active_sessions": sessions,
-            "auth_algorithm": algo,
-            "kex_algorithm": kem,
-            "mode": random.choices(["PQC-Only", "Hybrid"], weights=[70, 30])[0],
+            "id": bs["id"],
+            "host": bs["host"],
+            "ip": bs["ip"],
+            "region": bs["region"],
+            "status": "active",
+            "active_sessions": int(bs["sessions"]),
+            "auth_algorithm": bs["auth_algo"],
+            "kex_algorithm": bs["kex_algo"],
+            "mode": bs["mode"],
             "uptime": f"{uptime_hours}h",
-            "cpu_usage": round(random.uniform(12, 65), 1),
-            "memory_usage": round(random.uniform(30, 78), 1),
-            "auth_success_rate": round(99.5 + random.uniform(0, 0.49), 2),
-            "failed_attempts_24h": random.randint(0, 15),
-            "key_exchanges_today": random.randint(200, 800),
-            "last_key_rotation": f"{random.randint(1, 14)}d ago",
+            "cpu_usage": round(bs["cpu"], 1),
+            "memory_usage": round(bs["memory"], 1),
+            "auth_success_rate": round(99.5 + 0.3 * math.sin(elapsed * 0.02), 2),
+            "failed_attempts_24h": bs["failed_24h"],
+            "key_exchanges_today": bs["kex_today"],
+            "last_key_rotation": "3d ago",
             "firmware_version": "PQC-SSH-2.1.4",
             "pqc_percentage": min(95, 65 + int(elapsed * 0.015)),
         })
@@ -64,43 +93,60 @@ def get_ssh_bastions():
 
 
 def get_ssh_sessions():
-    """Returns list of active SSH sessions across all bastions."""
-    sessions = []
-    num_sessions = random.randint(20, 50)
+    """Returns a STABLE list of SSH sessions that evolves slowly."""
+    global _session_state, _session_last_refresh
+    now = time.time()
 
-    for _ in range(num_sessions):
-        bastion = random.choice(_BASTIONS)
-        user = random.choice(_USERS)
-        target = random.choice(_TARGETS)
-        algo = random.choice(_ALGOS)
-        kem = random.choice(_KEM_ALGOS)
-        mode = random.choices(["PQC-Only", "Hybrid", "Classical"], weights=[65, 30, 5])[0]
+    # Only regenerate sessions every 30 seconds (not every API call)
+    if _session_state is None or (now - _session_last_refresh) > 30:
+        _session_state = []
+        num_sessions = random.randint(25, 40)
 
-        duration_min = random.randint(1, 480)
-        if duration_min < 60:
-            duration_str = f"{duration_min}m"
-        else:
-            duration_str = f"{duration_min // 60}h {duration_min % 60}m"
+        for i in range(num_sessions):
+            bastion = _BASTIONS[i % len(_BASTIONS)]
+            user = _USERS[i % len(_USERS)]
+            target = _TARGETS[i % len(_TARGETS)]
+            algo = _ALGOS[i % len(_ALGOS)]
+            kem = _KEM_ALGOS[i % len(_KEM_ALGOS)]
+            mode = random.choices(["PQC-Only", "Hybrid", "Classical"], weights=[65, 30, 5])[0]
 
-        sessions.append({
-            "session_id": f"ssh-{uuid.uuid4().hex[:8]}",
-            "user": user,
-            "bastion": bastion["id"],
-            "bastion_region": bastion["region"],
-            "target": target,
-            "target_ip": f"10.{random.randint(1,254)}.{random.randint(1,254)}.{random.randint(1,254)}",
-            "auth_algorithm": algo if mode != "Classical" else "Ed25519",
-            "kex_algorithm": kem if mode != "Classical" else "ECDH-P256",
-            "mode": mode,
-            "cipher": "AES-256-GCM",
-            "duration": duration_str,
-            "bytes_transferred": f"{random.randint(1, 500)} MB",
-            "commands_executed": random.randint(1, 200),
-            "status": random.choices(["active", "idle"], weights=[80, 20])[0],
-            "started_at": (datetime.utcnow() - timedelta(minutes=duration_min)).isoformat(),
-        })
+            duration_min = random.randint(5, 300)
 
-    return sessions
+            _session_state.append({
+                "session_id": f"ssh-{uuid.uuid4().hex[:8]}",
+                "user": user,
+                "bastion": bastion["id"],
+                "bastion_region": bastion["region"],
+                "target": target,
+                "target_ip": f"10.{10 + i}.{random.randint(1,254)}.{random.randint(1,254)}",
+                "auth_algorithm": algo if mode != "Classical" else "Ed25519",
+                "kex_algorithm": kem if mode != "Classical" else "ECDH-P256",
+                "mode": mode,
+                "cipher": "AES-256-GCM",
+                "_duration": duration_min,
+                "bytes_transferred": f"{random.randint(5, 200)} MB",
+                "commands_executed": random.randint(5, 100),
+                "status": random.choices(["active", "idle"], weights=[80, 20])[0],
+                "started_at": (datetime.utcnow() - timedelta(minutes=duration_min)).isoformat(),
+            })
+
+        _session_last_refresh = now
+    else:
+        # Just increment durations and commands
+        for s in _session_state:
+            s["_duration"] += 1
+            s["commands_executed"] += random.randint(0, 2)
+
+    # Format duration for output
+    result = []
+    for s in _session_state:
+        d = s["_duration"]
+        dur = f"{d}m" if d < 60 else f"{d // 60}h {d % 60}m"
+        entry = {k: v for k, v in s.items() if not k.startswith("_")}
+        entry["duration"] = dur
+        result.append(entry)
+
+    return result
 
 
 def get_ssh_metrics():
@@ -118,7 +164,7 @@ def get_ssh_metrics():
         "pqc_percentage": min(95, 65 + int(elapsed * 0.015)),
         "hybrid_percentage": max(5, 35 - int(elapsed * 0.015)),
         "classical_percentage": 0,
-        "avg_auth_latency_ms": round(1.8 + random.uniform(-0.2, 0.2), 1),
+        "avg_auth_latency_ms": round(1.8 + 0.1 * math.sin(elapsed * 0.03), 1),
         "failed_attempts_24h": sum(b["failed_attempts_24h"] for b in bastions),
         "primary_auth_algo": "Dilithium3",
         "primary_kex_algo": "Kyber768",

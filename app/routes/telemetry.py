@@ -105,6 +105,13 @@ def telemetry_overview():
     return _build_telemetry_data()
 
 
+import hashlib
+import random
+
+def _generate_hex(seed: str, length: int) -> str:
+    rng = random.Random(seed)
+    return "".join(f"{rng.randint(0, 255):02x}" for _ in range(length))
+
 @router.get("/handshakes/recent")
 def recent_handshakes():
     """Last 20 TLS handshakes for the live feed."""
@@ -116,6 +123,11 @@ def recent_handshakes():
 
     result = []
     for h in handshakes:
+        # Generate stable mock keys based on connection ID
+        pk = "0x" + _generate_hex(h.connection_id + "pk", 1184)
+        ct = "0x" + _generate_hex(h.connection_id + "ct", 1088)
+        ss = "0x" + _generate_hex(h.connection_id + "ss", 32)
+        
         result.append({
             "connection_id": h.connection_id,
             "id": h.connection_id,
@@ -125,6 +137,11 @@ def recent_handshakes():
             "success": h.success,
             "fallback": h.fallback_triggered,
             "timestamp": h.timestamp.isoformat() if h.timestamp else None,
+            "keys": {
+                "server_public_key": pk,
+                "ciphertext": ct,
+                "shared_secret": ss
+            }
         })
 
     db.close()

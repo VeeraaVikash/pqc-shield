@@ -27,6 +27,7 @@ class TLSHandshake(Base):
 
 class ActiveTLSConnection(Base):
     __tablename__ = "active_tls_connections"
+    __mapper_args__ = {"confirm_deleted_rows": False}
 
     id = Column(String, primary_key=True)
     source = Column(String)

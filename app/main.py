@@ -21,23 +21,24 @@ from app.routes.websocket import router as ws_router
 from app.routes.settings import router as settings_router
 from app.routes.metrics_export import router as metrics_router
 
-# Models (ensures tables are created)
 from app.models.user_models import User
 from app.models.settings_models import Setting
 
-# CREATE APP
 app = FastAPI(
-    title="PQC Shield Backend",
+    title="QUANSEC Backend",
     description="Enterprise Post-Quantum Cryptography Management Platform",
     version="1.0.0",
 )
 
-# CORS
+# FIX: Allow all localhost origins so WebSocket connections from
+# Next.js (port 3000) are accepted by FastAPI (port 8000)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:3000",
         "http://127.0.0.1:3000",
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
         "https://pqc-shield.vercel.app",
         "https://*.vercel.app",
     ],
@@ -49,7 +50,7 @@ app.add_middleware(
 # DATABASE
 Base.metadata.create_all(bind=engine)
 
-# ALL 16 ROUTES
+# ROUTES
 app.include_router(auth_router,           prefix="/api/auth",            tags=["Auth"])
 app.include_router(protocols_router,      prefix="/api/protocols",       tags=["Protocols"])
 app.include_router(ssh_router,            prefix="/api/ssh",             tags=["SSH"])
@@ -67,16 +68,14 @@ app.include_router(audit_router,          prefix="/api/audit",           tags=["
 app.include_router(dashboard_router,      prefix="/api/dashboard",       tags=["Dashboard"])
 app.include_router(risk_router,           prefix="/api/risk",            tags=["Risk"])
 
-# SCHEDULER
 @app.on_event("startup")
 def startup_event():
     start_scheduler()
 
-# HEALTH CHECK
 @app.get("/")
 def root():
     return {
-        "service": "PQC Shield Backend",
+        "service": "QUANSEC Backend",
         "version": "1.0.0",
         "status": "running",
         "routes": 16,
