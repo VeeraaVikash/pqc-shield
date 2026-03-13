@@ -1,0 +1,31 @@
+services:
+  - type: web
+    name: quansec-backend
+    env: python
+    region: oregon
+    plan: free
+    
+    # Build command - installs dependencies
+    buildCommand: "pip install -r requirements.txt"
+    
+    # Start command - runs the FastAPI server
+    startCommand: "gunicorn main:app --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT --timeout 120 --workers 2"
+    
+    # Health check endpoint
+    healthCheckPath: "/"
+    healthCheckStartupTimeout: 300
+    
+    # Environment variables
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11
+      - key: ENVIRONMENT
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET_KEY
+        sync: false
+      - key: ALLOWED_ORIGINS
+        value: "https://pqc-shield.vercel.app,https://localhost:3000"
+        sync: false
+
